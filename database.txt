@@ -1,0 +1,125 @@
+1. users table
+
+CREATE TABLE IF NOT EXISTS users
+(
+    user_id uuid NOT NULL DEFAULT gen_random_uuid(),
+    firebase_uid character varying(128) COLLATE pg_catalog."default" NOT NULL,
+    full_name character varying(100) COLLATE pg_catalog."default",
+    email character varying(150) COLLATE pg_catalog."default" NOT NULL,
+    role character varying(20) COLLATE pg_catalog."default" DEFAULT 'student'::character varying,
+    status character varying(20) COLLATE pg_catalog."default" DEFAULT 'pending'::character varying,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    last_active_date date,
+    streak integer DEFAULT 0,
+    xp integer DEFAULT 0,
+    bio text COLLATE pg_catalog."default",
+    headline character varying(150) COLLATE pg_catalog."default",
+    linkedin character varying(255) COLLATE pg_catalog."default",
+    github character varying(255) COLLATE pg_catalog."default",
+    photo_url text COLLATE pg_catalog."default",
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT users_pkey PRIMARY KEY (user_id),
+    CONSTRAINT users_email_key UNIQUE (email),
+    CONSTRAINT users_firebase_uid_key UNIQUE (firebase_uid)
+)
+
+ALTER TABLE users
+RENAME COLUMN headline to "headline/college_name";
+
+2. courses table
+
+CREATE TABLE IF NOT EXISTS courses
+(
+    courses_id uuid NOT NULL DEFAULT gen_random_uuid(),
+    instructor_id uuid NOT NULL,
+    title character varying(255) COLLATE pg_catalog."default" NOT NULL,
+    description text COLLATE pg_catalog."default",
+    category character varying(100) COLLATE pg_catalog."default",
+    status character varying(20) COLLATE pg_catalog."default" DEFAULT 'pending'::character varying,
+    difficulty character varying(20) COLLATE pg_catalog."default",
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    thumbnail_url text COLLATE pg_catalog."default",
+    validity_value integer,
+    validity_unit character varying(10) COLLATE pg_catalog."default",
+    expires_at timestamp without time zone,
+    CONSTRAINT courses_pkey PRIMARY KEY (courses_id),
+    CONSTRAINT courses_instructor_id_fkey FOREIGN KEY (instructor_id)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT courses_difficulty_check CHECK (difficulty::text = ANY (ARRAY['Beginner'::character varying, 'Intermediate'::character varying, 'Advanced'::character varying]::text[])),
+    CONSTRAINT courses_status_check CHECK (status::text = ANY (ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying]::text[])),
+    CONSTRAINT courses_validity_unit_check CHECK (validity_unit::text = ANY (ARRAY['days'::character varying, 'months'::character varying, 'years'::character varying]::text[]))
+)
+
+3. student_courses table
+
+CREATE TABLE IF NOT EXISTS student_courses
+(
+    student_id uuid NOT NULL,
+    course_id uuid NOT NULL,
+    enrolled_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT student_courses_pkey PRIMARY KEY (student_id, course_id),
+    CONSTRAINT student_courses_course_id_fkey FOREIGN KEY (course_id)
+        REFERENCES public.courses (courses_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT student_courses_student_id_fkey FOREIGN KEY (student_id)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+)
+
+4. groups table
+
+CREATE TABLE groups (
+    group_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_name varchar(100) NOT NULL,
+    start_date timestamp NOT NULL,
+    end_date timestamp NOT NULL,
+    created_by uuid,
+    created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_group_dates CHECK (start_date < end_date)
+);
+
+UPDATE groups 
+SET created_by = NULL 
+WHERE start_date IS NOT NULL AND end_date IS NOT NULL;
+
+5. college_groups table
+
+CREATE OR REPLACE VIEW college_groups AS
+SELECT
+    uuid_generate_v5(
+        uuid_nil(),
+        u."headline/college_name"
+    ) AS group_id,
+    u."headline/college_name" AS group_name,
+    MIN(u.created_at) AS start_date,
+    NULL::timestamp AS end_date,
+    MIN(u.created_at) AS created_at
+FROM users u
+WHERE 
+    u."headline/college_name" IS NOT NULL
+    AND u.role = 'student'
+GROUP BY u."headline/college_name";
+
+6. group_users table
+
+CREATE TABLE group_users (
+  group_id uuid REFERENCES groups(group_id),
+  user_id uuid REFERENCES users(user_id),
+  assigned_at TIMESTAMP DEFAULT NOW(),
+  PRIMARY KEY (group_id, user_id)
+);
+
+ALTER TABLE group_users
+ADD COLUMN start_date TIMESTAMP,
+ADD COLUMN end_date TIMESTAMP;
+
+ALTER TABLE group_users
+ADD CONSTRAINT valid_date_range
+CHECK (start_date IS NULL OR end_date IS NULL OR start_date <= end_date);
+
+ALTER TABLE groups ALTER COLUMN start_date DROP NOT NULL;
+ALTER TABLE groups ALTER COLUMN end_date DROP NOT NULL;
