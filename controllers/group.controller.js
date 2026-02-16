@@ -152,7 +152,7 @@ export const getGroups = async (req, res) => {
 };
 
 export const getGroup = async (req, res) => {
-  const { id } = req.params; // Changed from groupId to id for consistency
+  const { id } = req.params;
 
   console.log('getGroup called with id:', id);
 
@@ -225,7 +225,7 @@ export const getGroup = async (req, res) => {
 };
 
 export const getGroupUsers = async (req, res) => {
-  const { id } = req.params; // Changed from groupId to id
+  const { id } = req.params;
 
   try {
     const groupCheck = await pool.query(
@@ -301,7 +301,7 @@ export const getGroupUsers = async (req, res) => {
 };
 
 export const addUserToGroup = async (req, res) => {
-  const { id, userId } = req.params; // Changed groupId to id
+  const { id, userId } = req.params;
   const { start_date, end_date } = req.body || {};
 
   try {
@@ -376,7 +376,7 @@ export const addUserToGroup = async (req, res) => {
 };
 
 export const removeUserFromGroup = async (req, res) => {
-  const { id, userId } = req.params; // Changed groupId to id
+  const { id, userId } = req.params;
 
   try {
     const groupCheck = await pool.query(
@@ -391,14 +391,14 @@ export const removeUserFromGroup = async (req, res) => {
     const { created_by, start_date, end_date, group_name } = groupCheck.rows[0];
 
     if (created_by) {
-      // MANUAL GROUP: Remove from group_users table (no conditions)
+      // MANUAL GROUP: Remove from group_users table
       await pool.query(
         `DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`,
         [id, userId]
       );
       return res.status(200).json({ message: "Student removed from manual group" });
     } else if (start_date && end_date) {
-      // TIMESTAMP GROUP: Remove from group_users table (no conditions)
+      // TIMESTAMP GROUP: Remove from group_users table
       await pool.query(
         `DELETE FROM group_users WHERE group_id = $1 AND user_id = $2`,
         [id, userId]
@@ -440,7 +440,7 @@ export const removeUserFromGroup = async (req, res) => {
 };
 
 export const updateGroup = async (req, res) => {
-  const { id } = req.params; // Changed groupId to id
+  const { id } = req.params;
   const { group_name, start_date, end_date } = req.body;
 
   console.log('updateGroup called with id:', id, 'data:', { group_name, start_date, end_date });
@@ -452,101 +452,74 @@ export const updateGroup = async (req, res) => {
   const normalizedName = group_name.toUpperCase().trim();
 
   try {
-    // First, check if this is a regular group row
     const groupCheck = await pool.query(
       `SELECT created_by, start_date, end_date FROM groups WHERE group_id = $1`,
       [id]
     );
 
-    if (groupCheck.rows.length > 0) {
-      // --- Regular groups (manual / timestamp / college-manual) ---
-      // Check if another group with same name exists
-      const existingNameCheck = await pool.query(
-        `SELECT group_id FROM groups WHERE 
-          REGEXP_REPLACE(UPPER(TRIM(group_name)), '[,.\\-_() ]+', ' ', 'g') = 
-          REGEXP_REPLACE($1, '[,.\\-_() ]+', ' ', 'g')
-          AND group_id != $2`,
-        [normalizedName, id]
-      );
-
-      if (existingNameCheck.rows.length > 0) {
-        return res
-          .status(409)
-          .json({ message: "A group with the same name already exists" });
-      }
-
-      const existing = groupCheck.rows[0];
-
-      let newStartDate = start_date || null;
-      let newEndDate = end_date || null;
-      let newCreatedBy = existing.created_by;
-
-      // If this is an existing timestamp group (no created_by and both dates),
-      // allow switching between timestamp / non-timestamp via dates.
-      const isExistingTimestamp =
-        !existing.created_by && existing.start_date && existing.end_date;
-
-      if (isExistingTimestamp) {
-        // If both dates are sent, keep as timestamp (created_by null)
-        // If not, treat as non-timestamp (keep created_by as is, which is null)
-        if (start_date && end_date) {
-          newCreatedBy = null;
-        }
-      } else if (
-        existing.created_by &&
-        !existing.start_date &&
-        !existing.end_date
-      ) {
-        // Pure manual/random group (manual student selection):
-        // ignore any incoming dates to avoid accidentally converting it
-        newStartDate = null;
-        newEndDate = null;
-        newCreatedBy = existing.created_by;
-      }
-
-      const result = await pool.query(
-        `UPDATE groups
-         SET group_name = $1,
-             start_date = $2,
-             end_date = $3,
-             created_by = $4
-         WHERE group_id = $5
-         RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
-        [normalizedName, newStartDate, newEndDate, newCreatedBy, id]
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      console.log('Group updated successfully:', result.rows[0].group_id);
-      return res.status(200).json(result.rows[0]);
-    }
-
-    // --- College-based groups from the college_groups VIEW ---
-    try {
-      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-      const collegeResult = await pool.query(
-        `SELECT group_id, group_name, start_date, end_date, created_at
-         FROM college_groups WHERE group_id = $1`,
-        [id]
-      );
-
-      if (collegeResult.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      // College groups are auto-derived from users. For now we:
-      // - Ignore any incoming dates (must remain "ongoing", end_date = NULL)
-      // - Ignore renaming, since group_id is derived from the college_name.
-      // Just return the current definition so the edit UI doesn't break.
-      const group = collegeResult.rows[0];
-      group.created_by = null;
-      return res.status(200).json(group);
-    } catch (e) {
-      console.error("updateGroup college_groups error:", e);
+    if (groupCheck.rows.length === 0) {
       return res.status(404).json({ message: "Group not found" });
     }
+
+    // Check if another group with same name exists
+    const existingNameCheck = await pool.query(
+      `SELECT group_id FROM groups WHERE 
+        REGEXP_REPLACE(UPPER(TRIM(group_name)), '[,.\\-_() ]+', ' ', 'g') = 
+        REGEXP_REPLACE($1, '[,.\\-_() ]+', ' ', 'g')
+        AND group_id != $2`,
+      [normalizedName, id]
+    );
+
+    if (existingNameCheck.rows.length > 0) {
+      return res.status(409).json({ message: "A group with the same name already exists" });
+    }
+
+    const existing = groupCheck.rows[0];
+
+    let newStartDate = start_date || null;
+    let newEndDate = end_date || null;
+    let newCreatedBy = existing.created_by;
+
+    // If this is an existing timestamp group (no created_by and both dates),
+    // allow switching between timestamp / non-timestamp via dates.
+    const isExistingTimestamp =
+      !existing.created_by && existing.start_date && existing.end_date;
+
+    if (isExistingTimestamp) {
+      // If both dates are sent, keep as timestamp (created_by null)
+      // If not, treat as non-timestamp (keep created_by as is, which is null)
+      if (start_date && end_date) {
+        newCreatedBy = null;
+      }
+    } else if (
+      existing.created_by &&
+      !existing.start_date &&
+      !existing.end_date
+    ) {
+      // Pure manual group (manual student selection):
+      // ignore any incoming dates to avoid accidentally converting it
+      newStartDate = null;
+      newEndDate = null;
+      newCreatedBy = existing.created_by;
+    }
+
+    const result = await pool.query(
+      `UPDATE groups
+       SET group_name = $1,
+           start_date = $2,
+           end_date = $3,
+           created_by = $4
+       WHERE group_id = $5
+       RETURNING group_id, group_name, start_date, end_date, created_by, created_at`,
+      [normalizedName, newStartDate, newEndDate, newCreatedBy, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    console.log('Group updated successfully:', result.rows[0].group_id);
+    return res.status(200).json(result.rows[0]);
   } catch (error) {
     console.error("updateGroup error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -554,64 +527,33 @@ export const updateGroup = async (req, res) => {
 };
 
 export const deleteGroup = async (req, res) => {
-  const { id } = req.params; // Changed groupId to id
+  const { id } = req.params;
 
   try {
-    // First check if this is a regular group row
     const groupCheck = await pool.query(
       `SELECT group_id FROM groups WHERE group_id = $1`,
       [id]
     );
 
-    if (groupCheck.rows.length > 0) {
-      // Regular group: remove memberships then delete group
-      await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [id]);
-
-      const result = await pool.query(
-        `DELETE FROM groups WHERE group_id = $1 RETURNING group_id`,
-        [id]
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      return res.status(200).json({ message: "Group deleted successfully" });
-    }
-
-    // If not in groups, it might be a college_groups (view) id.
-    try {
-      await pool.query("SELECT 1 FROM college_groups LIMIT 1");
-      const collegeCheck = await pool.query(
-        `SELECT group_name FROM college_groups WHERE group_id = $1`,
-        [id]
-      );
-
-      if (collegeCheck.rows.length === 0) {
-        return res.status(404).json({ message: "Group not found" });
-      }
-
-      const collegeName = collegeCheck.rows[0].group_name;
-
-      // "Deleting" a college-based group means clearing the college_name
-      // from all its students so the view no longer produces that group.
-      await pool.query(
-        `UPDATE users
-         SET "headline/college_name" = NULL
-         WHERE "headline/college_name" = $1
-           AND role = 'student'`,
-        [collegeName]
-      );
-
-      return res
-        .status(200)
-        .json({ message: "College-based group deleted successfully" });
-    } catch (e) {
-      console.error("deleteGroup college_groups error:", e);
+    if (groupCheck.rows.length === 0) {
       return res.status(404).json({ message: "Group not found" });
     }
+
+    // Remove memberships then delete group
+    await pool.query(`DELETE FROM group_users WHERE group_id = $1`, [id]);
+
+    const result = await pool.query(
+      `DELETE FROM groups WHERE group_id = $1 RETURNING group_id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    return res.status(200).json({ message: "Group deleted successfully" });
   } catch (error) {
     console.error("deleteGroup error:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
